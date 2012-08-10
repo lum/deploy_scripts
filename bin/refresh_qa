@@ -1,0 +1,10 @@
+#!/bin/bash
+env=`echo $ENV|tr A-Z a-z`
+
+knife ssh -x root -p 22223 "name:apps00*-qa-vb" "chef-client -l debug -L /var/log/chef/client.log" -a ipaddress
+
+knife ssh -x root -p 22223 "name:apps001-qa-vb" "service rabbitmq-server stop ; service rabbitmq-server start" -a ipaddress
+knife ssh -x root -p 22223 "name:apps00*-qa-vb" "bluepill whapps stop ; bluepill ecallmgr stop" -a ipaddress
+knife ssh -x root -p 22223 "name:apps00*-qa-vb" "bluepill whapps start ; bluepill ecallmgr start" -a ipaddress
+
+knife ssh -x root -p 22223 "name:apps001-qa-vb" "rabbitmqctl list_connections" -a ipaddress

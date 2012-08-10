@@ -1,0 +1,18 @@
+#!/bin/bash
+
+env=`echo $ENV|tr A-Z a-z`
+
+# sipoasis FS servers
+knife ssh -x root -p 22223 "name:whistle*.sipoasis.com AND role:whistle-fs" "bluepill stop; bluepill quit; yum clean all; yum -y remove freeswitch; rm -Rf /opt/freeswitch; bluepill load /etc/bluepill/freeswitch.pill; chef-client -L /tmp/client.log; bluepill restart" -a ipaddress
+
+# sipoasis prod whistle servers
+knife ssh -x root -p 22223 "name:whistle1.sipoasis.com" "chef-client -l debug -L /tmp/client.log" -a ipaddress
+knife ssh -x root -p 22223 "name:whistle1.sipoasis.com" "service rabbitmq-server restart" -a ipaddress
+
+# sipoasis prod FS servers
+knife ssh -x root -p 22223 "name:whistle*.sipoasis.com AND role:whistle-fs" "bluepill restart" -a ipaddress
+
+# start whapps and ecallgmr
+# prod servers
+knife ssh -x root -p 22223 "name:whistle1.sipoasis.com" "su - whistle -c '/opt/whistle/whistle/ecallmgr/start.sh'" -a ipaddress
+knife ssh -x root -p 22223 "name:whistle1.sipoasis.com" "su - whistle -c '/opt/whistle/whistle/whistle_apps/start.sh'" -a ipaddress

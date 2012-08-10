@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+echo -e ">>> Deploying Server"
+
+Provider=$1
+Environment=$2
+Deployment_ID=$3
+NodeName=$4
+OS=$5
+Size=$6
+Roles=$7
+Options=$8
+
+echo "$0 $*"
+
+svrlog=/home/autobot/server-provisioning.log
+
+roles=""
+for role in $Roles; do
+  roles=$roles",'role["$role"]'"
+done
+echo $roles
+case "$OS" in
+  ubuntu)
+    echo Building Ubuntu host
+    image_id=69
+    [ "$Provider" = "ec2" ] && image_id=ami-38e41251 # image_id=ami-2d4aa444
+    gems=ubuntu10.04-gems
+    ;;
+  centos)
+    echo Building CentOS host
+    image_id=51
+#    [ "$Provider" = "ec2" ] && image_id=ami-7341831a
+    [ "$Provider" = "ec2" ] && image_id=ami-38e41251
+    gems=centos5-gems
+    ;;
+esac
+
+case "$Size" in
+  256M)
+    flavor_id=1
+    ;;
+  512M)
+    flavor_id=2
+    ;;
+  1GB)
+    flavor_id=3
+    ;;
+  2GB)
+    flavor_id=4
+    ;;
+  4GB)
+    flavor_id=5
+    ;;
+  8GB)
+    flavor_id=6
+    ;;
+  15.5GB)
+    flavor_id=7
+    ;;
+  *)
+    flavor_id=$Size
+    ;;
+esac
+
+config="-c /home/slum/.chef/knife.rb"
+
+## Log Server Creation
+echo "`date` `hostname|cut -d . -f 1` ${0##*/}[$$]: create $*">> $svrlog
+
+case "$Provider" in
+  rackspace)
+  dashs="$NodeName-$Environment.2600hz.com"
+  ;;
+  ec2)
+  dashs="choochee-aws-key-001 -i /root/.ssh/choochee-aws-key-001.pem --ssh-user root"
+  ;;
+esac
+
+echo "running command: knife $Provider server create -r 'role[base_centos]',$roles -I $image_id -f $flavor_id -N $NodeName-$Environment -E $Environment -S $dashs -d $gems $config $Options"
+ssh root@kitchen-prod-dfw.2600hz.com "knife $Provider server create -r role[base_centos],$roles -I $image_id -f $flavor_id -N $NodeName-$Environment -E $Environment -S $dashs -d $gems $config $Options"

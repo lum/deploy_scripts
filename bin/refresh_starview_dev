@@ -1,0 +1,23 @@
+#!/bin/bash
+
+env=`echo $ENV|tr A-Z a-z`
+
+# starview dev FS servers
+knife ssh -x root -p 22223 "name:whistle-fs00*.starviewsolutions.com" -a ipaddress "bluepill stop; bluepill quit; yum clean all; yum -y remove freeswitch; rm -Rf /opt/freeswitch; bluepill load /etc/bluepill/freeswitch.pill; chef-client -L /tmp/client.log; bluepill restart" 
+
+# starview dev whistle servers
+knife ssh -x root -p 22223 "role:starview-dev AND role:whistle-apps-rpm" -a ipaddress "chef-client -l debug -L /tmp/client.log"
+knife ssh -x root -p 22223 "role:starview-dev AND role:whistle-apps-rpm" -a ipaddress "service rabbitmq-server restart"
+
+# starview dev FS servers
+knife ssh -x root -p 22223 "name:whistle-fs00*.starviewsolutions.com" -a ipaddress "bluepill restart"
+
+
+# stop whapps and ecallmgr
+#erl -name killer -setcookie 841stmLLaslk8320MMP  -eval "rpc:call('ecallmgr@wh-rs1.hosteduc.net', erlang, halt, [])." -s erlang halt
+#erl -name killer -setcookie 841stmLLaslk8320MMP  -eval "rpc:call('whistle_apps@wh-rs1.hosteduc.net', erlang, halt, [])." -s erlang halt
+
+# start whapps and ecallgmr
+# dev servers
+knife ssh -x root -p 22223 "role:starview-dev AND role:whistle-apps-rpm" "su - whistle -c '/opt/whistle/whistle/ecallmgr/start.sh'"
+knife ssh -x root -p 22223 "role:starview-dev AND role:whistle-apps-rpm" "su - whistle -c '/opt/whistle/whistle/whistle_apps/start.sh'"

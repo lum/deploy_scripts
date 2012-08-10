@@ -1,70 +1,60 @@
 #!/bin/bash
 
 ENVIRONMENT=$1
-BUILD_NUMBER=$2
-DEPLOYMENT_NAME=$3
+BUILD_TYPE=$2
+BUILD_ID=$3
+LOCATION=$4
 
-echo "--------------- $BUILD_NUMBER Deployment ---------------"
-echo "Deploying Site ID $BUILD_NUMBER$DEPLOYMENT_NAME using chef environment $ENVIRONMENT"
+#echo "NOTICE --- NIGHTLY DEPLOYMENTS ARE CURRENTLY OFFLINE"
+#echo "-------- Aaron Daniel <aarond@choochee.com> --------"
+#exit 100
+
+echo "--------------- $BUILD_TYPE Deployment ---------------"
+echo "Deploying Site ID $BUILD_TYPE$BUILD_ID into environment $ENVIRONMENT"
 echo
 
 echo "Saving environment details"
-PREV=`cat /tmp/deployment-$BUILD_NUMBER-$DEPLOYMENT_NAME 2> /dev/null`
-echo $DEPLOYMENT_NAME > /tmp/deployment-$BUILD_NUMBER-$DEPLOYMENT_NAME
+PREV=`cat /var/lib/chef/deployment-$BUILD_TYPE-$ENVIRONMENT-$LOCATION 2> /dev/null`
+echo $BUILD_ID > /var/lib/chef/deployment-$BUILD_TYPE-$ENVIRONMENT-$LOCATION
 echo
 
 echo "Creating proper roles"
-cat > /tmp/$BUILD_NUMBER$DEPLOYMENT_NAME.rb << EOP
-name "$BUILD_NUMBER$DEPLOYMENT_NAME"
-description "$BUILD_NUMBER deployment"
-default_attributes("deployment_id" => "$BUILD_NUMBER$DEPLOYMENT_NAME")
+cat > /tmp/$BUILD_TYPE$BUILD_ID.rb << EOP
+name "$BUILD_TYPE$BUILD_ID"
+description "$BUILD_TYPE deployment"
+default_attributes("deployment_id" => "$BUILD_TYPE$BUILD_ID")
 override_attributes "location" => "$LOCATION"
-
-{
-  "name": "$BUILD_NUMBER-$DEPLOYMENT_NAME",
-  "default_attributes": {
-    "couchdb_port": "5984",
-    "couchdb_username": "$BUILDNUMBER-$DEPLOYMENTNAME",
-    "couchdb_plaintext_password": "$BUILDNUMBER-$DEPLOYMENTNAME",
-    "whistle_git_url": "git://github.com/2600hz/whistle.git",
-    "whistle_branch": "master",
-    "whistle_fs_git_url": "git://github.com/2600hz/whistle-fs.git",
-    "whistle_fs_branch": "master",
-    "cluster": "{{ account._id }}",
-    "app_environment": "$BUILDNUMBER-$DEPLOYMENTNAME",
-    "erlang_cookie": "$BUILDNUMBER-$DEPLOYMENTNAME",
-    "segment": "1",
-    "couchdb_node": "127.0.0.1"
-  },
-  "json_class": "Chef::Role",
-  "env_run_lists": {
-  },
-  "run_list": [
-  ],
-  "description": "bigcouch role",
-  "chef_type": "role",
-  "override_attributes": {
-    "client_id": "$BUILDNUMBER-$DEPLOYMENTNAME",
-    "haproxy": {
-      "proxy_port": "15984",
-      "admin_proxy_port": "15986",
-      "app_server_role": "bigcouch",
-      "admin_port": "5986",
-      "member_port": "5984"
-    },
-    "chef_client": {
-      "interval": "300",
-      "splay": "60"
-    }
-  }
-}
 EOP
-knife role from file /tmp/$BUILD_NUMBER$DEPLOYMENT_NAME.rb
-rm /tmp/$BUILD_NUMBER$DEPLOYMENT_NAME.rb
+knife role from file /tmp/$BUILD_TYPE$BUILD_ID.rb
+rm /tmp/$BUILD_TYPE$BUILD_ID.rb
 echo
 
 echo "Running deployment"
-deploy_cluster -e $ENVIRONMENT -d $BUILD_NUMBER -s $DEPLOYMENT_NAME
+deploy_full_site -e $ENVIRONMENT -d $BUILD_TYPE$BUILD_ID -s $LOCATION
 
 echo "Deployment complete, sending notice to hudson"
-echo "Deploy: $BUILD_NUMBER$DEPLOYMENT_NAME $ENVIRONMENT has been Deployed" | mail -s "Deploy: $BUILD_NUMBER$DEPLOYMENT_NAME $ENVIRONMENT has been Deployed" stephen@2600hz.com
+echo "Deploy: $BUILD_TYPE$BUILD_ID $ENVIRONMENT $LOCATION has been Deployed" | mail -s "Deploy: $BUILD_TYPE$BUILD_ID $ENVIRONMENT $LOCATION has been Deployed" ops@choochee.com,qa@choochee.com,engineering@choochee.com,messenger@choochee.com
+if [ x"$ENVIRONMENT" = x"prod" ]; then
+  http://qa001.choochee.com:8080/job/WebServices/buildWithParameters?token=SQE&WS_BASE_URL=http://cws.choochee.com
+else
+  http://qa001.choochee.com:8080/job/WebServices/buildWithParameters?token=SQE&WS_BASE_URL=http://cws.$ENVIRONMENT.choochee.com
+fi
+
+if [ $BUILD_TYPE == "nightinggale" ]
+#if [ $BUILD_TYPE == "nightly" ]
+then
+  if [ "0"$PREV != "0" ]
+  then
+    echo "Destroying the previous environment: $PREV"
+    echo
+#    delete_rackspace_site $ENVIRONMENT $BUILD_TYPE$PREV
+#    knife role delete $BUILD_TYPE$PREV -y
+  fi
+fi
+
+if [ $ENVIRONMENT == "prod" ]
+then
+  knife ssh role:$BUILD_TYPE$BUILD_ID "crontab -r"
+  knife ssh "role:$BUILD_TYPE$BUILD_ID AND role:ws" "service tomcat stop"
+  knife ssh "role:$BUILD_TYPE$BUILD_ID AND role:messaging" "killall -9 java"
+fi

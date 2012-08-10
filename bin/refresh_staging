@@ -1,0 +1,9 @@
+#!/bin/bash
+
+env=`echo $ENV|tr A-Z a-z`
+
+knife ssh -x root -p 22223 "chef_environment:staging AND role:whistle-fs" "bluepill stop; bluepill quit; yum clean all; yum -y remove freeswitch; rm -Rf /opt/freeswitch; bluepill load /etc/bluepill/freeswitch.pill; chef-client -L /tmp/client.log; bluepill restart"
+
+knife ssh -x root -p 22223 "chef_environment:staging AND name:sipproxy00*-stage-*" "chef-client -l debug -L /tmp/client.log"
+
+knife ssh -x root -p 22223 "chef_environment:staging AND role:whistle-apps" "chef-client -l debug -L /tmp/client.log"

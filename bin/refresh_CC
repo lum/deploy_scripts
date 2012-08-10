@@ -1,0 +1,5 @@
+#!/bin/bash
+
+env=`echo $ENV|tr A-Z a-z`
+
+knife ssh -x root -p 22223 "role:cc AND role:whistle-apps" "chef-client -l debug -L /tmp/client.log"
