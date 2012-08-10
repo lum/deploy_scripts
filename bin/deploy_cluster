@@ -1,0 +1,222 @@
+#!/usr/bin/env ruby
+#
+#  Deploy Whistle Cluster
+#
+
+require 'pathname'
+$topdir = File.join(File.dirname(Pathname.new(__FILE__).realpath))
+$LOAD_PATH << "#{$topdir}/lib"
+
+require 'rubygems'
+require 'systemu'
+require 'optparse'
+require 'logger'
+
+params = ARGV.getopts("e:d:l:s:")
+
+raise "Missing Environment (-e)" unless params["e"]
+raise "Missing Deployment ID (-d)" unless params["d"]
+raise "Missing Site Location (-s)" unless params["s"]
+
+$svrlog = Logger.new("/var/log/chef/server-provisioning.log")
+$svrlog.level = Logger::INFO
+
+$log = Logger.new(STDOUT)
+if params["l"] == "debug"
+  $log.level = Logger::DEBUG
+else
+  $log.level = Logger::INFO
+end
+
+$env = params["e"]
+$d_id = params["d"]
+$site = params["s"]
+$threads = {}
+$config = "/home/slum/.chef/knife.rb"
+
+$log.debug "Deploying with config: #{$config}"
+time_started = Time.new
+
+# Shamelessly yanked and modified from Ruby on Rails
+# https://github.com/rails/rails
+class Numeric
+  # Enables the use of time calculations and declarations, like 45.minutes + 2.hours + 4.years.
+  def seconds
+    self
+  end
+  alias :second :seconds
+
+  def minutes
+    self * 60
+  end
+  alias :minute :minutes
+
+  def hours
+    self * 3600
+  end
+  alias :hour :hours
+
+  def days
+    self * 24.hours
+  end
+  alias :day :days
+
+  def weeks
+    self * 7.days
+  end
+  alias :week :weeks
+
+  def fortnights
+    self * 2.weeks
+  end
+  alias :fortnight :fortnights
+end
+
+class CommandTimeout < Exception
+end
+
+class RackspaceException < Exception
+end
+
+#def run_command command, reverse, filename = nil
+def run_command command, filename = nil
+  status, stdout, stderr = ""
+  begin
+        status, stdout, stderr = systemu command
+        raise RackspaceException if status.to_i == 256
+  rescue CommandTimeout
+        $log.error "Server took too long to deploy.  Please manually deploy:"
+        $log.error command
+        $log.error "=++==++= STDERR"
+        $log.error stderr
+        $log.error "=++==++= STDOUT"
+        $log.error stdout
+  rescue RackspaceException
+        if stderr.include?("javax.xml.ws.soap.SOAPFaultException: Could not send Message.")
+          $log.error "Rackspace API Fault.  Retrying command in 2 minutes:"
+          $svrlog.error "Rackspace API Fault.  Retrying command in 2 minutes:"
+        elsif stdout.include?("Name or service not known")
+          $log.error "Rackspace Server Creation Failure.  Retrying command in 2 minutes:"
+          $svrlog.error "Rackspace Server Creation Failure.  Retrying command in 2 minutes:"
+        else
+          $log.error "General Server Creation Failure.  Retrying command in 2 minutes:"
+          $svrlog.error "General Server Creation Failure.  Retrying command in 2 minutes:"
+        end
+        $log.error command
+        $log.error "=++==++= STDERR"
+        $log.error stderr
+        $log.error "=++==++= STDOUT"
+        $log.error stdout
+        sleep 2.minutes
+        retry
+  end
+
+  if filename
+        $log.debug "Logging system output to /var/log/chef/#{filename}.log"
+        File.open("/var/log/chef/#{filename}.log", 'w') do |file|
+          file.write "COMMAND =====================\r\n"
+          file.write "#{command}\r\n"
+          file.write "STATUS: #{status} ===================\r\n"
+          file.write "STDERR ======================\r\n"
+          file.write(stderr)
+          file.write "STDOUT ======================\r\n"
+          file.write(stdout)
+        end
+  else
+        if status.to_i > 0
+          $log.debug "=++==++= STDOUT"
+          $log.debug stdout
+          $log.info "=++==++= STDERR"
+          $log.info stderr
+        end
+  end
+end
+
+def timestamp id, message
+  puts "#{id} #{message} #{Time.now.to_i}"
+end
+
+def deploy_server node, node_string, roles, p = {}
+  # Set up the defaults
+  image = p[:image] ? p[:image] : 51
+  flavor = p[:flavor] ? p[:flavor] : 2
+  gems = p[:gems] ? p[:gems] : "centos5-gems"
+  reboot = p[:reboot] ? true : false
+  pool = p[:pool] ? p[:pool] : nil
+
+  # Set up the command
+  node_name = "#{node}.#{$d_id}.#{$env}"
+  $log.info "#{node_name} deploying"
+  command = "knife rackspace server create"
+  command += " -r 'role[centos_base]'"
+  roles.each do |role|
+        command += ",'role[#{role}]'"
+  end
+  command += " -E #{$env}"
+  command += " -I #{image}"
+  command += " -f #{flavor}"
+  command += " -N #{node_name}"
+  command += " -S #{node_name}.2600hz.com"
+  command += " -d #{gems}"
+  command += " -c #{$config}"
+  command += " --reboot" if reboot
+  # Open a server provisioning file handle for logging
+  $svrlog.info(command)
+  run_command command, node_name
+  $log.info "#{node_name} deployed"
+end
+
+def refresh_servers roles
+  $log.info "rs-#{roles.join(',')} start"
+  search = "role:#{$env} AND role:#{$d_id}"
+  roles.each do |role|
+        search += " AND role:#{role}"
+  end
+  command = "knife ssh '#{search}' chef-client -a ipaddress"
+  run_command command
+  $log.info "rs-#{roles.join(',')} done"
+end
+
+def kill_chef roles
+  $log.info "kc-#{roles.join(',')} start"
+  search = "role:#{$env} AND role:#{$d_id}"
+  roles.each do |role|
+        search += " AND role:#{role}"
+  end
+  command = "knife ssh '#{search}' 'service chef-client stop; chkconfig chef-client off' -a ipaddress"
+  run_command command
+  $log.info "kc-#{roles.join(',')} done"
+end
+
+def refresh_ns
+  $log.info "refresh_ns start"
+  command = "knife ssh role:ns chef-client -a ipaddress"
+  run_command command
+  $log.info "refresh_ns done"
+end
+
+def reboot_servers roles
+  $log.info "reboot-#{roles.join(',')} start"
+  search = "role:#{$env} AND role:#{$d_id}"
+  roles.each do |role|
+        search += " AND role:#{role}"
+  end
+  command = "knife ssh '#{search}' reboot -a ipaddress"
+  run_command command
+  $log.info "reboot-#{roles.join(',')} done"
+end
+
+
+## Deploy Whistle Cluster
+require 'deploy_whistle_cluster'
+
+$threads.each do |name,thread|
+  $log.debug "Waiting for #{name} to finish"
+  thread.join(14400)
+end
+$log.info "Deployment Complete."
+time_finished = Time.new
+elapsed = time_finished.to_f - time_started.to_f
+minutes, seconds = elapsed.divmod 60.0
+hours, minutes = minutes.divmod 60.0
+$log.info "Time to finish: #{hours.to_i} hours, #{minutes.to_i} minutes, #{seconds.to_i} seconds"

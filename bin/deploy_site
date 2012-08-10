@@ -1,0 +1,70 @@
+#!/bin/bash
+
+ENVIRONMENT=$1
+BUILD_NUMBER=$2
+DEPLOYMENT_NAME=$3
+
+echo "--------------- $BUILD_NUMBER Deployment ---------------"
+echo "Deploying Site ID $BUILD_NUMBER$DEPLOYMENT_NAME using chef environment $ENVIRONMENT"
+echo
+
+echo "Saving environment details"
+PREV=`cat /tmp/deployment-$BUILD_NUMBER-$DEPLOYMENT_NAME 2> /dev/null`
+echo $DEPLOYMENT_NAME > /tmp/deployment-$BUILD_NUMBER-$DEPLOYMENT_NAME
+echo
+
+echo "Creating proper roles"
+cat > /tmp/$BUILD_NUMBER$DEPLOYMENT_NAME.rb << EOP
+name "$BUILD_NUMBER$DEPLOYMENT_NAME"
+description "$BUILD_NUMBER deployment"
+default_attributes("deployment_id" => "$BUILD_NUMBER$DEPLOYMENT_NAME")
+override_attributes "location" => "$LOCATION"
+
+{
+  "name": "$BUILD_NUMBER-$DEPLOYMENT_NAME",
+  "default_attributes": {
+    "couchdb_port": "5984",
+    "couchdb_username": "$BUILDNUMBER-$DEPLOYMENTNAME",
+    "couchdb_plaintext_password": "$BUILDNUMBER-$DEPLOYMENTNAME",
+    "whistle_git_url": "git://github.com/2600hz/whistle.git",
+    "whistle_branch": "master",
+    "whistle_fs_git_url": "git://github.com/2600hz/whistle-fs.git",
+    "whistle_fs_branch": "master",
+    "cluster": "{{ account._id }}",
+    "app_environment": "$BUILDNUMBER-$DEPLOYMENTNAME",
+    "erlang_cookie": "$BUILDNUMBER-$DEPLOYMENTNAME",
+    "segment": "1",
+    "couchdb_node": "127.0.0.1"
+  },
+  "json_class": "Chef::Role",
+  "env_run_lists": {
+  },
+  "run_list": [
+  ],
+  "description": "bigcouch role",
+  "chef_type": "role",
+  "override_attributes": {
+    "client_id": "$BUILDNUMBER-$DEPLOYMENTNAME",
+    "haproxy": {
+      "proxy_port": "15984",
+      "admin_proxy_port": "15986",
+      "app_server_role": "bigcouch",
+      "admin_port": "5986",
+      "member_port": "5984"
+    },
+    "chef_client": {
+      "interval": "300",
+      "splay": "60"
+    }
+  }
+}
+EOP
+knife role from file /tmp/$BUILD_NUMBER$DEPLOYMENT_NAME.rb
+rm /tmp/$BUILD_NUMBER$DEPLOYMENT_NAME.rb
+echo
+
+echo "Running deployment"
+deploy_cluster -e $ENVIRONMENT -d $BUILD_NUMBER -s $DEPLOYMENT_NAME
+
+echo "Deployment complete, sending notice to hudson"
+echo "Deploy: $BUILD_NUMBER$DEPLOYMENT_NAME $ENVIRONMENT has been Deployed" | mail -s "Deploy: $BUILD_NUMBER$DEPLOYMENT_NAME $ENVIRONMENT has been Deployed" stephen@2600hz.com
